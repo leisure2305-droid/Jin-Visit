@@ -28,41 +28,39 @@
     .tab-btn { flex: 1; padding: 10px; background: #18181c; border: 1px solid var(--border-color); color: var(--text-sub); border-radius: 8px; font-weight: 600; cursor: pointer; text-align: center; font-size: 0.85rem; }
     .tab-btn.active { background: var(--card-bg); color: var(--accent-gold); border-color: var(--accent-gold); }
 
-    .sync-status { text-align: center; font-size: 0.75rem; color: var(--success-color); margin-bottom: 12px; }
-
     .card { background: var(--card-bg); border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color); }
     .card-title { font-size: 1.05rem; font-weight: 600; color: var(--accent-gold); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
     
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 0.8rem; color: var(--text-sub); margin-bottom: 4px; }
-    input[type="text"], input[type="password"], input[type="date"], input[type="time"], select, textarea {
+    input[type="text"], input[type="password"], input[type="date"], select, textarea {
       width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: #18181c; color: var(--text-color); font-size: 0.95rem;
     }
-    textarea { resize: vertical; min-height: 70px; }
+    
+    .time-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+    .time-slot { padding: 10px; border-radius: 6px; background: #18181c; border: 1px solid var(--border-color); text-align: center; font-size: 0.85rem; cursor: pointer; }
+    .time-slot.selected { border-color: var(--accent-gold); background: rgba(212, 175, 55, 0.15); color: var(--accent-gold); font-weight: bold; }
+    .time-slot.disabled { opacity: 0.4; cursor: not-allowed; background: #222228; text-decoration: line-through; }
     
     .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: opacity 0.2s; font-size: 0.95rem; }
     .btn-primary { background: linear-gradient(135deg, #d4af37, #f39c12); color: #000; margin-top: 8px; }
     .btn-secondary { background: #2e2e38; color: var(--text-color); margin-top: 8px; }
     .btn-danger { background: var(--danger-color); color: #fff; margin-top: 8px; }
-    .btn:active { opacity: 0.8; }
     
     .list-item { background: #18181c; border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 4px solid var(--accent-gold); position: relative; }
     .list-item.ng-item { border-left-color: var(--danger-color); }
     .list-item-header { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 4px; font-size: 0.95rem; }
-    .list-item-sub { font-size: 0.8rem; color: var(--text-sub); margin-bottom: 6px; }
-    .list-item-note { font-size: 0.85rem; color: #d0d0d5; background: #22222a; padding: 6px 8px; border-radius: 4px; margin-top: 6px; white-space: pre-wrap; }
-    .status-tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; background: #2e2e38; color: var(--accent-gold); margin-top: 4px; }
-    
+    .list-item-note { font-size: 0.85rem; color: #d0d0d5; background: #22222a; padding: 6px 8px; border-radius: 4px; margin-top: 6px; }
     .btn-delete { position: absolute; right: 10px; bottom: 10px; background: transparent; border: none; color: var(--danger-color); font-size: 0.75rem; cursor: pointer; }
 
     .hidden { display: none !important; }
     .error-msg { color: var(--danger-color); font-size: 0.8rem; margin-top: 6px; text-align: center; }
+    .info-msg { color: var(--accent-gold); font-size: 0.8rem; margin-top: 6px; text-align: center; }
   </style>
 
-  <!-- Firebase SDK Modules -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBaGgZtwTg24_YFZDrO6prkA9ZdtDogk",
@@ -77,15 +75,15 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
+    let selectedTimeSlot = "";
+    let reservationsData = [];
+    let ngData = [];
+
     // タブ切り替え
     const tabGuest = document.getElementById('tabGuest');
     const tabAdmin = document.getElementById('tabAdmin');
     const viewGuest = document.getElementById('viewGuest');
     const viewAdmin = document.getElementById('viewAdmin');
-    const adminAuthSection = document.getElementById('adminAuthSection');
-    const adminContentSection = document.getElementById('adminContentSection');
-
-    let isAdminLoggedIn = false;
 
     tabGuest.addEventListener('click', () => {
       tabGuest.classList.add('active');
@@ -99,32 +97,10 @@
       tabGuest.classList.remove('active');
       viewAdmin.classList.remove('hidden');
       viewGuest.classList.add('hidden');
-      checkAdminStatus();
     });
 
-    // 管理者認証チェック
-    async function checkAdminStatus() {
-      if (isAdminLoggedIn) {
-        adminAuthSection.classList.add('hidden');
-        adminContentSection.classList.remove('hidden');
-        return;
-      }
-      
-      const docRef = doc(db, "settings", "auth");
-      const docSnap = await getDoc(docRef);
-      if (!docSnap.exists()) {
-        document.getElementById('adminAuthTitle').innerText = "⚙️ 初回管理者パスワード設定";
-        document.getElementById('adminPassConfirmGroup').classList.remove('hidden');
-        document.getElementById('adminAuthBtn').innerText = "パスワードを登録してログイン";
-      } else {
-        document.getElementById('adminAuthTitle').innerText = "🔒 仁専用ログイン";
-        document.getElementById('adminPassConfirmGroup').classList.add('hidden');
-        document.getElementById('adminAuthBtn').innerText = "ログイン";
-      }
-    }
-
-    // パスワード送信処理
-    document.getElementById('adminAuthForm').addEventListener('submit', async (e) => {
+    // 仁専用ログイン処理 (初期パスワード: jin1234)
+    document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const pass = document.getElementById('adminPassInput').value;
       const errorEl = document.getElementById('adminAuthError');
@@ -132,162 +108,133 @@
 
       const docRef = doc(db, "settings", "auth");
       const docSnap = await getDoc(docRef);
+      const currentPass = docSnap.exists() ? docSnap.data().password : "jin1234";
 
-      if (!docSnap.exists()) {
-        const passConfirm = document.getElementById('adminPassConfirmInput').value;
-        if (pass.length < 4) {
-          errorEl.innerText = "パスワードは4文字以上にしてください。";
-          return;
-        }
-        if (pass !== passConfirm) {
-          errorEl.innerText = "パスワードが一致しません。";
-          return;
-        }
-        await setDoc(docRef, { password: pass });
-        alert("管理者パスワードを設定しました。");
-        isAdminLoggedIn = true;
-        adminAuthSection.classList.add('hidden');
-        adminContentSection.classList.remove('hidden');
+      if (pass === currentPass) {
+        document.getElementById('adminAuthSection').classList.add('hidden');
+        document.getElementById('adminContentSection').classList.remove('hidden');
       } else {
-        if (docSnap.data().password === pass) {
-          isAdminLoggedIn = true;
-          adminAuthSection.classList.add('hidden');
-          adminContentSection.classList.remove('hidden');
-        } else {
-          errorEl.innerText = "パスワードが正しくありません。";
-        }
+        errorEl.innerText = "パスワードが正しくありません。";
+      }
+    });
+
+    // パスワード変更
+    document.getElementById('changePassForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const newPass = document.getElementById('newPassInput').value;
+      if (newPass.length < 4) {
+        alert("パスワードは4文字以上で設定してください。");
+        return;
+      }
+      await setDoc(doc(db, "settings", "auth"), { password: newPass });
+      alert("パスワードを変更しました。次回から新しいパスワードでログインしてください。");
+      document.getElementById('newPassInput').value = '';
+    });
+
+    // パスワード忘れ・リセット
+    document.getElementById('btnResetPass').addEventListener('click', async () => {
+      if (confirm('パスワードを初期パスワード ( jin1234 ) にリセットしますか？')) {
+        await setDoc(doc(db, "settings", "auth"), { password: "jin1234" });
+        alert('パスワードを「jin1234」にリセットしました。');
       }
     });
 
     // ログアウト
     document.getElementById('btnLogout').addEventListener('click', () => {
-      isAdminLoggedIn = false;
+      document.getElementById('adminAuthSection').classList.remove('hidden');
+      document.getElementById('adminContentSection').classList.add('hidden');
       document.getElementById('adminPassInput').value = '';
-      adminAuthSection.classList.remove('hidden');
-      adminContentSection.classList.add('hidden');
     });
 
-    // --- データ連携 (Firestore) ---
+    // 日付変更時に利用可能な時間帯を動的生成
+    document.getElementById('resDate').addEventListener('change', updateTimeSlots);
 
-    // 1. 面会予約 (ゲスト側)
+    function updateTimeSlots() {
+      const dateVal = document.getElementById('resDate').value;
+      const container = document.getElementById('timeSlotsContainer');
+      container.innerHTML = '';
+      selectedTimeSlot = "";
+
+      if (!dateVal) return;
+
+      const dateObj = new Date(dateVal);
+      const day = dateObj.getDay(); // 0: 日, 6: 土
+      const isWeekend = (day === 0 || day === 6);
+
+      // 平日 14-20時、土日 12-20時
+      const startHour = isWeekend ? 12 : 14;
+      const endHour = 20;
+
+      for (let h = startHour; h < endHour; h++) {
+        const timeStr = `${String(h).padStart(2, '0')}:00 - ${String(h + 1).padStart(2, '0')}:00`;
+        const slot = document.createElement('div');
+        slot.className = 'time-slot';
+
+        // 予約済みまたはNG時間帯かを判定
+        const isReserved = reservationsData.some(r => r.date === dateVal && r.time === timeStr);
+        const isNg = ngData.some(n => {
+          if (n.date !== dateVal) return false;
+          if (!n.startHour) return true; // 全日NG
+          return h >= parseInt(n.startHour) && h < parseInt(n.endHour);
+        });
+
+        if (isReserved || isNg) {
+          slot.classList.add('disabled');
+          slot.innerText = `${timeStr} (× 予約不可)`;
+        } else {
+          slot.innerText = `${timeStr} (〇 予約可)`;
+          slot.addEventListener('click', () => {
+            document.querySelectorAll('.time-slot').forEach(el => el.classList.remove('selected'));
+            slot.classList.add('selected');
+            selectedTimeSlot = timeStr;
+          });
+        }
+        container.appendChild(slot);
+      }
+    }
+
+    // 友人面会予約送信
     document.getElementById('guestReservationForm').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!selectedTimeSlot) {
+        alert("ご希望の時間帯を選択してください。");
+        return;
+      }
       const visitor = document.getElementById('resVisitor').value;
       const date = document.getElementById('resDate').value;
-      const time = document.getElementById('resTime').value;
       const note = document.getElementById('resNote').value;
 
       try {
         await addDoc(collection(db, "reservations"), {
-          visitor, date, time, note, createdAt: new Date()
+          visitor, date, time: selectedTimeSlot, note, createdAt: new Date()
         });
-        alert("面会予約を送信しました！");
+        alert("面会予約が完了しました！");
         document.getElementById('guestReservationForm').reset();
+        document.getElementById('timeSlotsContainer').innerHTML = '';
       } catch (err) {
-        alert("予約の送信に失敗しました: " + err.message);
+        alert("予約に失敗しました: " + err.message);
       }
     });
 
-    // 面会予定リスト（ゲスト・管理者共有表示）
-    const qReservations = query(collection(db, "reservations"), orderBy("date", "asc"));
-    onSnapshot(qReservations, (snapshot) => {
-      const gList = document.getElementById('guestReservationList');
-      const aList = document.getElementById('adminReservationList');
-      gList.innerHTML = '';
-      aList.innerHTML = '';
-
-      if (snapshot.empty) {
-        gList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予定された面会はありません</p>';
-        aList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予定された面会はありません</p>';
-        return;
-      }
-
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const id = docSnap.id;
-
-        // ゲスト用画面
-        const gItem = document.createElement('div');
-        gItem.className = 'list-item';
-        gItem.innerHTML = `
-          <div class="list-item-header">
-            <span>📅 ${data.date} ${data.time}</span>
-            <span>👤 ${data.visitor}</span>
-          </div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
-        `;
-        gList.appendChild(gItem);
-
-        // 管理者用画面（削除ボタン付）
-        const aItem = document.createElement('div');
-        aItem.className = 'list-item';
-        aItem.innerHTML = `
-          <div class="list-item-header">
-            <span>📅 ${data.date} ${data.time}</span>
-            <span>👤 ${data.visitor}</span>
-          </div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
-          <button class="btn-delete" onclick="deleteData('reservations', '${id}')">削除</button>
-        `;
-        aList.appendChild(aItem);
-      });
-    });
-
-    // 2. NG日時管理 (仁さん側)
+    // 仁専用：NG時間帯の追加
     document.getElementById('ngForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const date = document.getElementById('ngDate').value;
+      const startHour = document.getElementById('ngStartHour').value;
+      const endHour = document.getElementById('ngEndHour').value;
       const note = document.getElementById('ngNote').value;
 
       try {
-        await addDoc(collection(db, "ng_dates"), { date, note, createdAt: new Date() });
+        await addDoc(collection(db, "ng_dates"), {
+          date, startHour, endHour, note, createdAt: new Date()
+        });
         document.getElementById('ngForm').reset();
       } catch (err) {
-        alert("NG日時の保存に失敗しました: " + err.message);
+        alert("NG設定の追加に失敗しました: " + err.message);
       }
     });
 
-    const qNg = query(collection(db, "ng_dates"), orderBy("date", "asc"));
-    onSnapshot(qNg, (snapshot) => {
-      const gList = document.getElementById('guestNgList');
-      const aList = document.getElementById('adminNgList');
-      gList.innerHTML = '';
-      aList.innerHTML = '';
-
-      if (snapshot.empty) {
-        gList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">面会不可の予定はありません</p>';
-        aList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">登録されたNG日はありません</p>';
-        return;
-      }
-
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const id = docSnap.id;
-
-        const gItem = document.createElement('div');
-        gItem.className = 'list-item ng-item';
-        gItem.innerHTML = `
-          <div class="list-item-header">
-            <span>⛔ ${data.date}</span>
-          </div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
-        `;
-        gList.appendChild(gItem);
-
-        const aItem = document.createElement('div');
-        aItem.className = 'list-item ng-item';
-        aItem.innerHTML = `
-          <div class="list-item-header">
-            <span>⛔ ${data.date}</span>
-          </div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
-          <button class="btn-delete" onclick="deleteData('ng_dates', '${id}')">削除</button>
-        `;
-        aList.appendChild(aItem);
-      });
-    });
-
-    // 3. 差し入れ・お土産・お返し管理 (仁さん側)
+    // 仁専用：ギフト管理
     document.getElementById('giftForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const item = document.getElementById('giftItem').value;
@@ -305,15 +252,89 @@
       }
     });
 
+    // リアルタイムデータ同期（予約データ）
+    const qReservations = query(collection(db, "reservations"), orderBy("date", "asc"));
+    onSnapshot(qReservations, (snapshot) => {
+      reservationsData = [];
+      const today = new Date().toISOString().split('T')[0];
+      const gList = document.getElementById('guestReservationList');
+      const aTodayList = document.getElementById('adminTodayReservationList');
+      const aAllList = document.getElementById('adminAllReservationList');
+
+      gList.innerHTML = '';
+      aTodayList.innerHTML = '';
+      aAllList.innerHTML = '';
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const id = docSnap.id;
+        data.id = id;
+        reservationsData.push(data);
+
+        // 友人側リスト（名前非表示）
+        const gItem = document.createElement('div');
+        gItem.className = 'list-item';
+        gItem.innerHTML = `<div class="list-item-header">📅 ${data.date} ${data.time} <span>[ 予約あり ]</span></div>`;
+        gList.appendChild(gItem);
+
+        // 管理者側リスト（名前表示）
+        const aItem = document.createElement('div');
+        aItem.className = 'list-item';
+        aItem.innerHTML = `
+          <div class="list-item-header">
+            <span>📅 ${data.date} ${data.time}</span>
+            <span>👤 ${data.visitor} 様</span>
+          </div>
+          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
+          <button class="btn-delete" onclick="deleteData('reservations', '${id}')">削除</button>
+        `;
+
+        if (data.date === today) {
+          aTodayList.appendChild(aItem.cloneNode(true));
+        }
+        aAllList.appendChild(aItem);
+      });
+
+      if (gList.innerHTML === '') gList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予定された面会はありません</p>';
+      if (aTodayList.innerHTML === '') aTodayList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">本日の予約はありません</p>';
+      if (aAllList.innerHTML === '') aAllList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予約はありません</p>';
+
+      updateTimeSlots();
+    });
+
+    // リアルタイムデータ同期（NG設定）
+    const qNg = query(collection(db, "ng_dates"), orderBy("date", "asc"));
+    onSnapshot(qNg, (snapshot) => {
+      ngData = [];
+      const aList = document.getElementById('adminNgList');
+      aList.innerHTML = '';
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const id = docSnap.id;
+        ngData.push(data);
+
+        const timeInfo = data.startHour ? `${data.startHour}:00〜${data.endHour}:00` : '終日';
+        const aItem = document.createElement('div');
+        aItem.className = 'list-item ng-item';
+        aItem.innerHTML = `
+          <div class="list-item-header">⛔ ${data.date} (${timeInfo})</div>
+          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
+          <button class="btn-delete" onclick="deleteData('ng_dates', '${id}')">削除</button>
+        `;
+        aList.appendChild(aItem);
+      });
+
+      if (aList.innerHTML === '') aList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">NG登録はありません</p>';
+
+      updateTimeSlots();
+    });
+
+    // リアルタイムデータ同期（ギフト）
     const qGifts = query(collection(db, "gifts"), orderBy("createdAt", "desc"));
     onSnapshot(qGifts, (snapshot) => {
       const list = document.getElementById('adminGiftList');
       list.innerHTML = '';
-
-      if (snapshot.empty) {
-        list.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">記録はありません</p>';
-        return;
-      }
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -322,21 +343,19 @@
         item.className = 'list-item';
         item.style.borderLeftColor = 'var(--accent-amber)';
         item.innerHTML = `
-          <div class="list-item-header">
-            <span>🎁 ${data.item}</span>
-            <span style="font-size:0.8rem; color:var(--text-sub);">持参: ${data.from}</span>
-          </div>
-          <div class="status-tag">お返し: ${data.returnStatus}</div>
+          <div class="list-item-header">🎁 ${data.item} <span style="font-size:0.8rem; color:var(--text-sub);">${data.from} 様</span></div>
+          <div style="font-size:0.8rem; color:var(--accent-gold); margin-top:4px;">お返し: ${data.returnStatus}</div>
           ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
           <button class="btn-delete" onclick="deleteData('gifts', '${id}')">削除</button>
         `;
         list.appendChild(item);
       });
+
+      if (list.innerHTML === '') list.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">記録はありません</p>';
     });
 
-    // 削除処理のグローバル登録
     window.deleteData = async (colName, id) => {
-      if (confirm('この記録を削除しますか？')) {
+      if (confirm('この項目を削除しますか？')) {
         await deleteDoc(doc(db, colName, id));
       }
     };
@@ -345,23 +364,20 @@
 <body>
   <div class="container">
     <header>
-      <h1>仁 面会予約＆管理</h1>
-      <p>スケジュール調整・面会サポート</p>
+      <h1>仁 面会予約＆管理システム</h1>
+      <p>面会スケジュール・差し入れ管理</p>
     </header>
 
-    <div class="sync-status">● リアルタイム自動同期中</div>
-
-    <!-- ナビゲーションタブ -->
+    <!-- タブ切り替え -->
     <div class="nav-tabs">
-      <button id="tabGuest" class="tab-btn active">📅 面会予約（ご友人用）</button>
-      <button id="tabAdmin" class="tab-btn">🔒 仁専用管理ページ</button>
+      <button id="tabGuest" class="tab-btn active">📅 面会予約（友人用）</button>
+      <button id="tabAdmin" class="tab-btn">🔒 仁専用ページ</button>
     </div>
 
-    <!-- ================= 1. 友人・面会者用画面 ================= -->
+    <!-- ================= 1. 友人用予約画面 ================= -->
     <div id="viewGuest">
-      <!-- 予約フォーム -->
       <div class="card">
-        <div class="card-title">📅 面会を予約する</div>
+        <div class="card-title">📅 面会予約フォーム</div>
         <form id="guestReservationForm">
           <div class="form-group">
             <label>お名前</label>
@@ -372,108 +388,144 @@
             <input type="date" id="resDate" required>
           </div>
           <div class="form-group">
-            <label>希望時間</label>
-            <input type="time" id="resTime" required>
+            <label>希望時間帯 (平日: 14〜20時 / 土日祝: 12〜20時)</label>
+            <div id="timeSlotsContainer" class="time-grid"></div>
           </div>
           <div class="form-group">
-            <label>メモ・伝言</label>
-            <textarea id="resNote" placeholder="面会人数や連絡事項など"></textarea>
+            <label>メモ・連絡事項</label>
+            <textarea id="resNote" placeholder="面会人数など"></textarea>
           </div>
           <button type="submit" class="btn btn-primary">面会を予約する</button>
         </form>
       </div>
 
-      <!-- 面会不可（NG）日時一覧 -->
       <div class="card">
-        <div class="card-title">⛔ 面会不可（NG）の日時</div>
-        <div id="guestNgList"></div>
-      </div>
-
-      <!-- 予約済み一覧 -->
-      <div class="card">
-        <div class="card-title">📋 現在の面会予定</div>
+        <div class="card-title">📋 面会予約状況</div>
         <div id="guestReservationList"></div>
       </div>
     </div>
 
     <!-- ================= 2. 仁専用管理画面 ================= -->
     <div id="viewAdmin" class="hidden">
-      <!-- パスワード認証画面 -->
+      <!-- ログイン画面 -->
       <div id="adminAuthSection" class="card">
-        <div id="adminAuthTitle" class="card-title">🔒 仁専用ログイン</div>
-        <form id="adminAuthForm">
+        <div class="card-title">🔒 仁専用ログイン</div>
+        <p style="font-size: 0.8rem; color: var(--text-sub); margin-bottom: 12px;">初期パスワード: <b style="color: var(--accent-gold);">jin1234</b></p>
+        <form id="adminLoginForm">
           <div class="form-group">
             <label>パスワード</label>
             <input type="password" id="adminPassInput" placeholder="パスワードを入力" required>
           </div>
-          <div class="form-group hidden" id="adminPassConfirmGroup">
-            <label>確認用パスワード</label>
-            <input type="password" id="adminPassConfirmInput" placeholder="もう一度入力">
-          </div>
           <div id="adminAuthError" class="error-msg"></div>
-          <button type="submit" id="adminAuthBtn" class="btn btn-primary">ログイン</button>
+          <button type="submit" class="btn btn-primary">ログイン</button>
         </form>
+        <button id="btnResetPass" class="btn btn-secondary" style="margin-top: 12px; font-size: 0.8rem;">パスワードを忘れた場合（初期化）</button>
       </div>
 
-      <!-- 管理者コンテンツ画面（認証後に表示） -->
+      <!-- 仁専用コンテンツ（ログイン後） -->
       <div id="adminContentSection" class="hidden">
-        <!-- 面会不可（NG）設定 -->
+        <!-- 本日の予約 -->
         <div class="card">
-          <div class="card-title">⛔ 面会不可（NG）日時を追加</div>
+          <div class="card-title">📌 本日の面会予定</div>
+          <div id="adminTodayReservationList"></div>
+        </div>
+
+        <!-- 面会不可 (NG) 日時設定 -->
+        <div class="card">
+          <div class="card-title">⛔ 検査・リハビリ等のNG時間設定</div>
           <form id="ngForm">
             <div class="form-group">
               <label>日付</label>
               <input type="date" id="ngDate" required>
             </div>
+            <div class="form-group" style="display: flex; gap: 8px;">
+              <div style="flex: 1;">
+                <label>開始時間</label>
+                <select id="ngStartHour">
+                  <option value="12">12:00</option>
+                  <option value="13">13:00</option>
+                  <option value="14">14:00</option>
+                  <option value="15">15:00</option>
+                  <option value="16">16:00</option>
+                  <option value="17">17:00</option>
+                  <option value="18">18:00</option>
+                  <option value="19">19:00</option>
+                </select>
+              </div>
+              <div style="flex: 1;">
+                <label>終了時間</label>
+                <select id="ngEndHour">
+                  <option value="13">13:00</option>
+                  <option value="14">14:00</option>
+                  <option value="15">15:00</option>
+                  <option value="16">16:00</option>
+                  <option value="17">17:00</option>
+                  <option value="18">18:00</option>
+                  <option value="19">19:00</option>
+                  <option value="20">20:00</option>
+                </select>
+              </div>
+            </div>
             <div class="form-group">
               <label>理由・メモ</label>
-              <input type="text" id="ngNote" placeholder="例: リハビリ、検査等">
+              <input type="text" id="ngNote" placeholder="例: 回診・リハビリなど">
             </div>
-            <button type="submit" class="btn btn-primary">NG日時を追加</button>
+            <button type="submit" class="btn btn-primary">NG時間を追加</button>
           </form>
-          <div style="margin-top: 16px;">
-            <div style="font-size:0.85rem; font-weight:600; margin-bottom:8px; color:var(--accent-gold);">登録済みNG日</div>
+          <div style="margin-top: 12px;">
+            <div style="font-size:0.85rem; font-weight:600; color:var(--accent-gold); margin-bottom:8px;">登録済みNG枠</div>
             <div id="adminNgList"></div>
           </div>
         </div>
 
-        <!-- 差し入れ・お土産・お返し管理 -->
+        <!-- 差し入れ・お返し管理 -->
         <div class="card">
           <div class="card-title">🎁 差し入れ・お土産・お返し管理</div>
-          <form id="giftForm" style="margin-bottom: 16px;">
+          <form id="giftForm" style="margin-bottom: 12px;">
             <div class="form-group">
               <label>品名・内容</label>
-              <input type="text" id="giftItem" placeholder="例: フルーツ、タオル" required>
+              <input type="text" id="giftItem" placeholder="例: お茶、タオル" required>
             </div>
             <div class="form-group">
-              <label>持ってきた人</label>
+              <label>持参者</label>
               <input type="text" id="giftFrom" placeholder="例: 山田 太郎" required>
             </div>
             <div class="form-group">
               <label>お返し状況</label>
               <select id="giftReturn">
-                <option value="未">未（これから）</option>
+                <option value="未（後で）">未（後で）</option>
                 <option value="不要">不要</option>
                 <option value="完了">完了</option>
               </select>
             </div>
             <div class="form-group">
               <label>メモ</label>
-              <input type="text" id="giftNote" placeholder="数量や注意点など">
+              <input type="text" id="giftNote" placeholder="メモ">
             </div>
-            <button type="submit" class="btn btn-primary" style="background: linear-gradient(135deg, #f39c12, #d4af37);">記録を追加</button>
+            <button type="submit" class="btn btn-primary">記録を追加</button>
           </form>
           <div id="adminGiftList"></div>
         </div>
 
-        <!-- 予約状況管理 -->
+        <!-- 全予約管理 -->
         <div class="card">
-          <div class="card-title">📋 全予約の管理</div>
-          <div id="adminReservationList"></div>
+          <div class="card-title">📋 全ての面会予約一覧</div>
+          <div id="adminAllReservationList"></div>
         </div>
 
-        <!-- ログアウトボタン -->
-        <button id="btnLogout" class="btn btn-secondary">ログアウト</button>
+        <!-- パスワード設定・ログアウト -->
+        <div class="card">
+          <div class="card-title">⚙️ パスワード変更</div>
+          <form id="changePassForm">
+            <div class="form-group">
+              <label>新しいパスワード</label>
+              <input type="password" id="newPassInput" placeholder="新しいパスワード" required>
+            </div>
+            <button type="submit" class="btn btn-secondary">パスワードを変更する</button>
+          </form>
+        </div>
+
+        <button id="btnLogout" class="btn btn-danger">ログアウト</button>
       </div>
     </div>
   </div>
