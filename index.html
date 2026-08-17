@@ -17,7 +17,7 @@
       --danger-color: #e74c3c;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-color); color: var(--text-color); padding-bottom: 40px; display: flex; justify-content: center; }
+    body { background-color: var(--bg-color); color: var(--text-color); padding-bottom: 40px; display: flex; justify-content: center; min-height: 100vh; }
     .container { width: 100%; max-width: 500px; padding: 16px; }
     header { text-align: center; padding: 16px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 16px; }
     header h1 { font-size: 1.4rem; color: var(--accent-gold); font-weight: 700; letter-spacing: 1px; }
@@ -30,13 +30,14 @@
     
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 0.8rem; color: var(--text-sub); margin-bottom: 4px; }
-    input[type="text"], input[type="date"], input[type="time"], textarea {
+    input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea {
       width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: #18181c; color: var(--text-color); font-size: 0.95rem;
     }
     textarea { resize: vertical; min-height: 70px; }
     
     .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: opacity 0.2s; font-size: 0.95rem; }
     .btn-primary { background: linear-gradient(135deg, #d4af37, #f39c12); color: #000; margin-top: 8px; }
+    .btn-secondary { background: #2e2e38; color: var(--text-color); margin-top: 8px; }
     .btn:active { opacity: 0.8; }
     
     .list-item { background: #18181c; border-radius: 8px; padding: 12px; margin-bottom: 10px; border-left: 4px solid var(--accent-gold); position: relative; }
@@ -44,12 +45,15 @@
     .list-item-sub { font-size: 0.8rem; color: var(--text-sub); margin-bottom: 6px; }
     .list-item-note { font-size: 0.85rem; color: #d0d0d5; background: #22222a; padding: 6px 8px; border-radius: 4px; margin-top: 6px; white-space: pre-wrap; }
     .btn-delete { position: absolute; right: 10px; bottom: 10px; background: transparent; border: none; color: var(--danger-color); font-size: 0.75rem; cursor: pointer; }
+
+    .hidden { display: none !important; }
+    .error-msg { color: var(--danger-color); font-size: 0.8rem; margin-top: 6px; text-align: center; }
   </style>
 
   <!-- Firebase SDK Modules -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     // Firebase設定
     const firebaseConfig = {
@@ -67,10 +71,142 @@
     const db = getFirestore(app);
 
     // DOM要素
+    const authSection = document.getElementById('authSection');
+    const mainSection = document.getElementById('mainSection');
+    const authTitle = document.getElementById('authTitle');
+    const authForm = document.getElementById('authForm');
+    const passInput = document.getElementById('passInput');
+    const passConfirmGroup = document.getElementById('passConfirmGroup');
+    const passConfirmInput = document.getElementById('passConfirmInput');
+    const authError = document.getElementById('authError');
+    const authBtn = document.getElementById('authBtn');
+
     const reservationForm = document.getElementById('reservationForm');
     const itemForm = document.getElementById('itemForm');
     const reservationList = document.getElementById('reservationList');
     const itemList = document.getElementById('itemList');
+
+    let isFirstTime = false;
+
+    // パスワード設定状態のチェック
+    async function checkAuthSetup() {
+      try {
+        const docRef = doc(db, "settings", "auth");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          isFirstTime = false;
+          authTitle.innerText = "🔒 パスワード入力";
+          passConfirmGroup.classList.add('hidden');
+          authBtn.innerText = "ログイン";
+        } else {
+          isFirstTime = true;
+          authTitle.innerText = "⚙️ 初回パスワードの設定";
+          passConfirmGroup.classList.remove('hidden');
+          authBtn.innerText = "パスワードを登録して始める";
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    checkAuthSetup();
+
+    // 認証フォーム送信
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      authError.innerText = '';
+      const pass = passInput.value;
+
+      if (isFirstTime) {
+        const passConfirm = passConfirmInput.value;
+        if (pass.length < 4) {
+          authError.innerText = "パスワードは4文字以上にしてください。";
+          return;
+        }
+        if (pass !== passConfirm) {
+          authError.innerText = "パスワードが一致しません。";
+          return;
+        }
+        try {
+          await setDoc(doc(db, "settings", "auth"), { password: pass });
+          alert("パスワードを設定しました！");
+          showMainApp();
+        } catch (err) {
+          authError.innerText = "設定の保存に失敗しました: " + err.message;
+        }
+      } else {
+        try {
+          const docRef = doc(db, "settings", "auth");
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists() && docSnap.data().password === pass) {
+            showMainApp();
+          } else {
+            authError.innerText = "パスワードが正しくありません。";
+          }
+        } catch (err) {
+          authError.innerText = "認証エラー: " + err.message;
+        }
+      }
+    });
+
+    function showMainApp() {
+      authSection.classList.add('hidden');
+      mainSection.classList.remove('hidden');
+      startRealtimeListeners();
+    }
+
+    function startRealtimeListeners() {
+      // リアルタイム読み込み（面会予約）
+      const qReservations = query(collection(db, "reservations"), orderBy("date", "asc"));
+      onSnapshot(qReservations, (snapshot) => {
+        reservationList.innerHTML = '';
+        if (snapshot.empty) {
+          reservationList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予定された面会はありません</p>';
+          return;
+        }
+        snapshot.forEach((docSnapshot) => {
+          const data = docSnapshot.data();
+          const id = docSnapshot.id;
+          const item = document.createElement('div');
+          item.className = 'list-item';
+          item.innerHTML = `
+            <div class="list-item-header">
+              <span>📅 ${data.date} ${data.time}</span>
+              <span>👤 ${data.visitor}</span>
+            </div>
+            ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
+            <button class="btn-delete" onclick="deleteData('reservations', '${id}')">削除</button>
+          `;
+          reservationList.appendChild(item);
+        });
+      });
+
+      // リアルタイム読み込み（差し入れ）
+      const qItems = query(collection(db, "items"), orderBy("date", "desc"));
+      onSnapshot(qItems, (snapshot) => {
+        itemList.innerHTML = '';
+        if (snapshot.empty) {
+          itemList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">記録された差し入れはありません</p>';
+          return;
+        }
+        snapshot.forEach((docSnapshot) => {
+          const data = docSnapshot.data();
+          const id = docSnapshot.id;
+          const item = document.createElement('div');
+          item.className = 'list-item';
+          item.style.borderLeftColor = 'var(--accent-amber)';
+          item.innerHTML = `
+            <div class="list-item-header">
+              <span>🎁 ${data.name}</span>
+              <span style="font-size:0.8rem; color:var(--text-sub);">${data.date}</span>
+            </div>
+            ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
+            <button class="btn-delete" onclick="deleteData('items', '${id}')">削除</button>
+          `;
+          itemList.appendChild(item);
+        });
+      });
+    }
 
     // 面会予約の保存
     reservationForm.addEventListener('submit', async (e) => {
@@ -107,57 +243,6 @@
       }
     });
 
-    // リアルタイム読み込み（面会予約）
-    const qReservations = query(collection(db, "reservations"), orderBy("date", "asc"));
-    onSnapshot(qReservations, (snapshot) => {
-      reservationList.innerHTML = '';
-      if (snapshot.empty) {
-        reservationList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予定された面会はありません</p>';
-        return;
-      }
-      snapshot.forEach((docSnapshot) => {
-        const data = docSnapshot.data();
-        const id = docSnapshot.id;
-        const item = document.createElement('div');
-        item.className = 'list-item';
-        item.innerHTML = `
-          <div class="list-item-header">
-            <span>📅 ${data.date} ${data.time}</span>
-            <span>👤 ${data.visitor}</span>
-          </div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
-          <button class="btn-delete" onclick="deleteData('reservations', '${id}')">削除</button>
-        `;
-        reservationList.appendChild(item);
-      });
-    });
-
-    // リアルタイム読み込み（差し入れ）
-    const qItems = query(collection(db, "items"), orderBy("date", "desc"));
-    onSnapshot(qItems, (snapshot) => {
-      itemList.innerHTML = '';
-      if (snapshot.empty) {
-        itemList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">記録された差し入れはありません</p>';
-        return;
-      }
-      snapshot.forEach((docSnapshot) => {
-        const data = docSnapshot.data();
-        const id = docSnapshot.id;
-        const item = document.createElement('div');
-        item.className = 'list-item';
-        item.style.borderLeftColor = 'var(--accent-amber)';
-        item.innerHTML = `
-          <div class="list-item-header">
-            <span>🎁 ${data.name}</span>
-            <span style="font-size:0.8rem; color:var(--text-sub);">${data.date}</span>
-          </div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
-          <button class="btn-delete" onclick="deleteData('items', '${id}')">削除</button>
-        `;
-        itemList.appendChild(item);
-      });
-    });
-
     // 削除処理のグローバル化
     window.deleteData = async (collectionName, id) => {
       if (confirm('この記録を削除しますか？')) {
@@ -173,57 +258,77 @@
       <p>面会スケジュール＆差し入れ管理</p>
     </header>
 
-    <div class="sync-status">● リアルタイム自動同期中</div>
-
-    <!-- 面会予約登録 -->
-    <div class="card">
-      <div class="card-title">📅 新しい面会を予約する</div>
-      <form id="reservationForm">
+    <!-- 認証画面（パスワード設定・入力） -->
+    <div id="authSection" class="card">
+      <div id="authTitle" class="card-title">🔒 パスワードの確認中...</div>
+      <form id="authForm">
         <div class="form-group">
-          <label>面会者名</label>
-          <input type="text" id="resVisitor" placeholder="例: 山田 太郎" required>
+          <label>パスワード</label>
+          <input type="password" id="passInput" placeholder="パスワードを入力" required>
         </div>
-        <div class="form-group">
-          <label>日付</label>
-          <input type="date" id="resDate" required>
+        <div class="form-group hidden" id="passConfirmGroup">
+          <label>パスワード（確認用）</label>
+          <input type="password" id="passConfirmInput" placeholder="もう一度入力">
         </div>
-        <div class="form-group">
-          <label>時間</label>
-          <input type="time" id="resTime" required>
-        </div>
-        <div class="form-group">
-          <label>メモ・備考</label>
-          <textarea id="resNote" placeholder="部屋番号や連絡事項など"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">予約を追加する</button>
+        <div id="authError" class="error-msg"></div>
+        <button type="submit" id="authBtn" class="btn btn-primary">進む</button>
       </form>
     </div>
 
-    <!-- 予約一覧 -->
-    <div class="card">
-      <div class="card-title">📋 予定されている面会</div>
-      <div id="reservationList"></div>
-    </div>
+    <!-- メインコンテンツ画面（ログイン後に表示） -->
+    <div id="mainSection" class="hidden">
+      <div class="sync-status">● リアルタイム自動同期中</div>
 
-    <!-- 差し入れ管理 -->
-    <div class="card">
-      <div class="card-title">🎁 差し入れ記録</div>
-      <form id="itemForm" style="margin-bottom: 16px;">
-        <div class="form-group">
-          <label>品名・内容</label>
-          <input type="text" id="itemName" placeholder="例: お茶、タオル" required>
-        </div>
-        <div class="form-group">
-          <label>持参・受取日</label>
-          <input type="date" id="itemDate" required>
-        </div>
-        <div class="form-group">
-          <label>メモ</label>
-          <input type="text" id="itemNote" placeholder="持参者や数量など">
-        </div>
-        <button type="submit" class="btn btn-primary" style="background: linear-gradient(135deg, #f39c12, #d4af37);">差し入れを記録</button>
-      </form>
-      <div id="itemList"></div>
+      <!-- 面会予約登録 -->
+      <div class="card">
+        <div class="card-title">📅 新しい面会を予約する</div>
+        <form id="reservationForm">
+          <div class="form-group">
+            <label>面会者名</label>
+            <input type="text" id="resVisitor" placeholder="例: 山田 太郎" required>
+          </div>
+          <div class="form-group">
+            <label>日付</label>
+            <input type="date" id="resDate" required>
+          </div>
+          <div class="form-group">
+            <label>時間</label>
+            <input type="time" id="resTime" required>
+          </div>
+          <div class="form-group">
+            <label>メモ・備考</label>
+            <textarea id="resNote" placeholder="部屋番号や連絡事項など"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">予約を追加する</button>
+        </form>
+      </div>
+
+      <!-- 予約一覧 -->
+      <div class="card">
+        <div class="card-title">📋 予定されている面会</div>
+        <div id="reservationList"></div>
+      </div>
+
+      <!-- 差し入れ管理 -->
+      <div class="card">
+        <div class="card-title">🎁 差し入れ記録</div>
+        <form id="itemForm" style="margin-bottom: 16px;">
+          <div class="form-group">
+            <label>品名・内容</label>
+            <input type="text" id="itemName" placeholder="例: お茶、タオル" required>
+          </div>
+          <div class="form-group">
+            <label>持参・受取日</label>
+            <input type="date" id="itemDate" required>
+          </div>
+          <div class="form-group">
+            <label>メモ</label>
+            <input type="text" id="itemNote" placeholder="持参者や数量など">
+          </div>
+          <button type="submit" class="btn btn-primary" style="background: linear-gradient(135deg, #f39c12, #d4af37);">差し入れを記録</button>
+        </form>
+        <div id="itemList"></div>
+      </div>
     </div>
   </div>
 </body>
