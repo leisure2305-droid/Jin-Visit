@@ -358,7 +358,7 @@
       }
     });
 
-    // リアルタイムデータ同期（予約データ）
+    // リアルタイムデータ同期（予約データ：友人用は日取りのみ、仁用は詳細表示）
     const qReservations = query(collection(db, "reservations"), orderBy("date", "asc"));
     onSnapshot(qReservations, (snapshot) => {
       reservationsData = [];
@@ -379,7 +379,7 @@
 
         const countText = data.visitorsCount ? `(${data.visitorsCount}名)` : '';
 
-        // 友人用リスト
+        // 友人用リスト（プライバシーのため誰の名前かは伏せて予約あり時間だけ表示）
         const gItem = document.createElement('div');
         gItem.className = 'list-item';
         gItem.innerHTML = `<div class="list-item-header">📅 ${data.date} ${data.time} <span>[ 予約あり ]</span></div>`;
@@ -438,7 +438,7 @@
       renderTimeGrid();
     });
 
-    // リアルタイムデータ同期（ギフト）
+    // リアルタイムデータ同期（ギフト・お返し管理）
     const qGifts = query(collection(db, "gifts"), orderBy("createdAt", "desc"));
     onSnapshot(qGifts, (snapshot) => {
       const list = document.getElementById('adminGiftList');
@@ -476,8 +476,8 @@
 <body>
   <div class="container">
     <header>
-      <h1>仁 面会予約＆管理システム</h1>
-      <p>面会スケジュール・差し入れ管理</p>
+      <h1>仁 面会予約システム</h1>
+      <p>面会スケジュール管理</p>
     </header>
 
     <!-- タブ切り替え -->
@@ -612,7 +612,7 @@
           </div>
         </div>
 
-        <!-- 差し入れ・お返し管理 -->
+        <!-- 差し入れ・お返し管理（仁専用ページ内のみ表示） -->
         <div class="card">
           <div class="card-title">🎁 差し入れ・お土産・お返し管理</div>
           <form id="giftForm" style="margin-bottom: 12px;">
