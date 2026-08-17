@@ -37,6 +37,11 @@
       width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: #18181c; color: var(--text-color); font-size: 0.95rem;
     }
     
+    .visitor-input-container { background: #16161a; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 12px; }
+    .visitor-field { margin-bottom: 8px; }
+    .visitor-field:last-child { margin-bottom: 0; }
+    .visitor-field label { font-size: 0.75rem; color: var(--accent-gold); }
+
     .time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
     .time-btn { padding: 10px; background: #18181c; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-color); font-size: 0.8rem; cursor: pointer; text-align: center; }
     .time-btn.selected { border-color: var(--accent-gold); background: rgba(212, 175, 55, 0.15); color: var(--accent-gold); font-weight: bold; }
@@ -152,7 +157,7 @@
       const days = ['日', '月', '火', '水', '木', '金', '土'];
 
       let current = new Date();
-      const endDate = new Date(2026, 8, 30); // 2026年9月30日（月は0始まりのため8）
+      const endDate = new Date(2026, 8, 30); // 2026年9月30日
 
       while (current <= endDate) {
         const yyyy = current.getFullYear();
@@ -169,6 +174,27 @@
         current.setDate(current.getDate() + 1);
       }
     }
+
+    // 人数選択に応じた名前入力欄の動的生成
+    const countSelect = document.getElementById('resCountSelect');
+    const namesContainer = document.getElementById('visitorNamesContainer');
+
+    function renderVisitorFields() {
+      const count = parseInt(countSelect.value);
+      namesContainer.innerHTML = '';
+
+      for (let i = 1; i <= count; i++) {
+        const field = document.createElement('div');
+        field.className = 'visitor-field';
+        field.innerHTML = `
+          <label>お名前 ${i} ${i === 1 ? '(代表者)' : ''}</label>
+          <input type="text" class="visitor-name-input" placeholder="例: 山田 太郎" required>
+        `;
+        namesContainer.appendChild(field);
+      }
+    }
+
+    countSelect.addEventListener('change', renderVisitorFields);
 
     // 日付変更時に時間帯グリッド生成
     document.getElementById('resDateSelect').addEventListener('change', renderTimeGrid);
@@ -237,16 +263,29 @@
         alert("希望時間帯を選択してください。");
         return;
       }
-      const visitor = document.getElementById('resVisitor').value;
+
+      // 名前を配列で取得
+      const nameInputs = document.querySelectorAll('.visitor-name-input');
+      const visitors = Array.from(nameInputs).map(i => i.value.trim()).filter(v => v.length > 0);
+      const count = parseInt(countSelect.value);
+
+      if (visitors.length < count) {
+        alert("全員のお名前を入力してください。");
+        return;
+      }
+
       const note = document.getElementById('resNote').value;
 
       try {
         await addDoc(collection(db, "reservations"), {
-          visitor, date, time: selectedTime, note, createdAt: new Date()
+          visitor: visitors.join("、"),
+          visitorsCount: count,
+          date, time: selectedTime, note, createdAt: new Date()
         });
         alert("面会予約が完了しました！");
         document.getElementById('guestReservationForm').reset();
         selectedTime = null;
+        renderVisitorFields();
         renderTimeGrid();
       } catch (err) {
         alert("予約に失敗しました: " + err.message);
@@ -308,6 +347,8 @@
         data.id = id;
         reservationsData.push(data);
 
+        const countText = data.visitorsCount ? `(${data.visitorsCount}名)` : '';
+
         // 友人用リスト
         const gItem = document.createElement('div');
         gItem.className = 'list-item';
@@ -320,7 +361,7 @@
         aItem.innerHTML = `
           <div class="list-item-header">
             <span>📅 ${data.date} ${data.time}</span>
-            <span>👤 ${data.visitor} 様</span>
+            <span>👤 ${data.visitor} 様 ${countText}</span>
           </div>
           ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
           <button class="btn-delete" onclick="deleteData('reservations', '${id}')">削除</button>
@@ -399,6 +440,7 @@
 
     // 初期起動処理
     initDateDropdown();
+    renderVisitorFields();
   </script>
 </head>
 <body>
@@ -420,9 +462,19 @@
         <div class="card-title">📅 面会予約フォーム</div>
         <form id="guestReservationForm">
           <div class="form-group">
-            <label>お名前</label>
-            <input type="text" id="resVisitor" placeholder="例: 山田 太郎" required>
+            <label>面会人数</label>
+            <select id="resCountSelect">
+              <option value="1">1名</option>
+              <option value="2">2名</option>
+              <option value="3">3名</option>
+              <option value="4">4名</option>
+              <option value="5">5名</option>
+            </select>
           </div>
+
+          <!-- 動的に生成される名前入力エリア -->
+          <div id="visitorNamesContainer" class="visitor-input-container"></div>
+
           <div class="form-group">
             <label>希望日</label>
             <select id="resDateSelect" required>
@@ -437,7 +489,7 @@
           </div>
           <div class="form-group">
             <label>メモ・連絡事項</label>
-            <textarea id="resNote" placeholder="面会人数など"></textarea>
+            <textarea id="resNote" placeholder="伝言などがあれば入力してください"></textarea>
           </div>
           <button type="submit" class="btn btn-primary">面会を予約する</button>
         </form>
