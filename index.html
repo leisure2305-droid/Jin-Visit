@@ -37,11 +37,11 @@
       width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: #18181c; color: var(--text-color); font-size: 0.95rem;
     }
     
-    .time-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
-    .time-slot { padding: 10px; border-radius: 6px; background: #18181c; border: 1px solid var(--border-color); text-align: center; font-size: 0.85rem; cursor: pointer; }
-    .time-slot.selected { border-color: var(--accent-gold); background: rgba(212, 175, 55, 0.15); color: var(--accent-gold); font-weight: bold; }
-    .time-slot.disabled { opacity: 0.4; cursor: not-allowed; background: #222228; text-decoration: line-through; }
-    
+    .time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+    .time-btn { padding: 10px; background: #18181c; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-color); font-size: 0.8rem; cursor: pointer; text-align: center; }
+    .time-btn.selected { border-color: var(--accent-gold); background: rgba(212, 175, 55, 0.15); color: var(--accent-gold); font-weight: bold; }
+    .time-btn.disabled { opacity: 0.4; cursor: not-allowed; border-color: #333; background: #121214; color: #888; }
+
     .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: opacity 0.2s; font-size: 0.95rem; }
     .btn-primary { background: linear-gradient(135deg, #d4af37, #f39c12); color: #000; margin-top: 8px; }
     .btn-secondary { background: #2e2e38; color: var(--text-color); margin-top: 8px; }
@@ -55,7 +55,6 @@
 
     .hidden { display: none !important; }
     .error-msg { color: var(--danger-color); font-size: 0.8rem; margin-top: 6px; text-align: center; }
-    .info-msg { color: var(--accent-gold); font-size: 0.8rem; margin-top: 6px; text-align: center; }
   </style>
 
   <script type="module">
@@ -75,9 +74,9 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    let selectedTimeSlot = "";
     let reservationsData = [];
     let ngData = [];
+    let selectedTime = null;
 
     // タブ切り替え
     const tabGuest = document.getElementById('tabGuest');
@@ -99,7 +98,7 @@
       viewGuest.classList.add('hidden');
     });
 
-    // 仁専用ログイン処理 (初期パスワード: jin1234)
+    // 仁専用ログイン処理
     document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const pass = document.getElementById('adminPassInput').value;
@@ -131,7 +130,7 @@
       document.getElementById('newPassInput').value = '';
     });
 
-    // パスワード忘れ・リセット
+    // パスワードリセット
     document.getElementById('btnResetPass').addEventListener('click', async () => {
       if (confirm('パスワードを初期パスワード ( jin1234 ) にリセットしますか？')) {
         await setDoc(doc(db, "settings", "auth"), { password: "jin1234" });
@@ -146,71 +145,109 @@
       document.getElementById('adminPassInput').value = '';
     });
 
-    // 日付変更時に利用可能な時間帯を動的生成
-    document.getElementById('resDate').addEventListener('change', updateTimeSlots);
+    // 日付プルダウン初期化（今日〜2026年9月30日まで）
+    function initDateDropdown() {
+      const selectEl = document.getElementById('resDateSelect');
+      selectEl.innerHTML = '<option value="">-- 日付を選択してください --</option>';
+      const days = ['日', '月', '火', '水', '木', '金', '土'];
 
-    function updateTimeSlots() {
-      const dateVal = document.getElementById('resDate').value;
-      const container = document.getElementById('timeSlotsContainer');
-      container.innerHTML = '';
-      selectedTimeSlot = "";
+      let current = new Date();
+      const endDate = new Date(2026, 8, 30); // 2026年9月30日（月は0始まりのため8）
 
-      if (!dateVal) return;
+      while (current <= endDate) {
+        const yyyy = current.getFullYear();
+        const mm = String(current.getMonth() + 1).padStart(2, '0');
+        const dd = String(current.getDate()).padStart(2, '0');
+        const dateVal = `${yyyy}-${mm}-${dd}`;
+        const dayStr = days[current.getDay()];
 
-      const dateObj = new Date(dateVal);
-      const day = dateObj.getDay(); // 0: 日, 6: 土
+        const opt = document.createElement('option');
+        opt.value = dateVal;
+        opt.innerText = `${yyyy}/${mm}/${dd} (${dayStr})`;
+        selectEl.appendChild(opt);
+
+        current.setDate(current.getDate() + 1);
+      }
+    }
+
+    // 日付変更時に時間帯グリッド生成
+    document.getElementById('resDateSelect').addEventListener('change', renderTimeGrid);
+
+    function renderTimeGrid() {
+      const dateVal = document.getElementById('resDateSelect').value;
+      const gridContainer = document.getElementById('timeGridContainer');
+      gridContainer.innerHTML = '';
+      selectedTime = null;
+
+      if (!dateVal) {
+        gridContainer.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center; grid-column:span 2;">日付を先に選択してください</p>';
+        return;
+      }
+
+      const dateObj = new Date(dateVal + "T00:00:00");
+      const day = dateObj.getDay();
       const isWeekend = (day === 0 || day === 6);
 
-      // 平日 14-20時、土日 12-20時
       const startHour = isWeekend ? 12 : 14;
       const endHour = 20;
 
       for (let h = startHour; h < endHour; h++) {
         const timeStr = `${String(h).padStart(2, '0')}:00 - ${String(h + 1).padStart(2, '0')}:00`;
-        const slot = document.createElement('div');
-        slot.className = 'time-slot';
+        const hourPrefix = `${String(h).padStart(2, '0')}:00`;
 
-        // 予約済みまたはNG時間帯かを判定
-        const isReserved = reservationsData.some(r => r.date === dateVal && r.time === timeStr);
+        // 予約済み判定
+        const isReserved = reservationsData.some(r => r.date === dateVal && (r.time.includes(hourPrefix) || r.time === timeStr));
+
+        // NG判定
         const isNg = ngData.some(n => {
           if (n.date !== dateVal) return false;
-          if (!n.startHour) return true; // 全日NG
+          if (!n.startHour) return true;
           return h >= parseInt(n.startHour) && h < parseInt(n.endHour);
         });
 
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'time-btn';
+
         if (isReserved || isNg) {
-          slot.classList.add('disabled');
-          slot.innerText = `${timeStr} (× 予約不可)`;
+          btn.classList.add('disabled');
+          btn.innerText = `${timeStr}\n(× 予約不可)`;
+          btn.disabled = true;
         } else {
-          slot.innerText = `${timeStr} (〇 予約可)`;
-          slot.addEventListener('click', () => {
-            document.querySelectorAll('.time-slot').forEach(el => el.classList.remove('selected'));
-            slot.classList.add('selected');
-            selectedTimeSlot = timeStr;
+          btn.innerText = `${timeStr}\n(〇 予約可)`;
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedTime = timeStr;
           });
         }
-        container.appendChild(slot);
+        gridContainer.appendChild(btn);
       }
     }
 
-    // 友人面会予約送信
+    // 予約送信
     document.getElementById('guestReservationForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (!selectedTimeSlot) {
-        alert("ご希望の時間帯を選択してください。");
+      const date = document.getElementById('resDateSelect').value;
+      if (!date) {
+        alert("希望日を選択してください。");
+        return;
+      }
+      if (!selectedTime) {
+        alert("希望時間帯を選択してください。");
         return;
       }
       const visitor = document.getElementById('resVisitor').value;
-      const date = document.getElementById('resDate').value;
       const note = document.getElementById('resNote').value;
 
       try {
         await addDoc(collection(db, "reservations"), {
-          visitor, date, time: selectedTimeSlot, note, createdAt: new Date()
+          visitor, date, time: selectedTime, note, createdAt: new Date()
         });
         alert("面会予約が完了しました！");
         document.getElementById('guestReservationForm').reset();
-        document.getElementById('timeSlotsContainer').innerHTML = '';
+        selectedTime = null;
+        renderTimeGrid();
       } catch (err) {
         alert("予約に失敗しました: " + err.message);
       }
@@ -271,13 +308,13 @@
         data.id = id;
         reservationsData.push(data);
 
-        // 友人側リスト（名前非表示）
+        // 友人用リスト
         const gItem = document.createElement('div');
         gItem.className = 'list-item';
         gItem.innerHTML = `<div class="list-item-header">📅 ${data.date} ${data.time} <span>[ 予約あり ]</span></div>`;
         gList.appendChild(gItem);
 
-        // 管理者側リスト（名前表示）
+        // 仁用リスト
         const aItem = document.createElement('div');
         aItem.className = 'list-item';
         aItem.innerHTML = `
@@ -299,7 +336,7 @@
       if (aTodayList.innerHTML === '') aTodayList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">本日の予約はありません</p>';
       if (aAllList.innerHTML === '') aAllList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">予約はありません</p>';
 
-      updateTimeSlots();
+      renderTimeGrid();
     });
 
     // リアルタイムデータ同期（NG設定）
@@ -327,7 +364,7 @@
 
       if (aList.innerHTML === '') aList.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center;">NG登録はありません</p>';
 
-      updateTimeSlots();
+      renderTimeGrid();
     });
 
     // リアルタイムデータ同期（ギフト）
@@ -359,6 +396,9 @@
         await deleteDoc(doc(db, colName, id));
       }
     };
+
+    // 初期起動処理
+    initDateDropdown();
   </script>
 </head>
 <body>
@@ -385,11 +425,15 @@
           </div>
           <div class="form-group">
             <label>希望日</label>
-            <input type="date" id="resDate" required>
+            <select id="resDateSelect" required>
+              <option value="">-- 日付を選択してください --</option>
+            </select>
           </div>
           <div class="form-group">
             <label>希望時間帯 (平日: 14〜20時 / 土日祝: 12〜20時)</label>
-            <div id="timeSlotsContainer" class="time-grid"></div>
+            <div id="timeGridContainer" class="time-grid">
+              <p style="font-size:0.8rem; color:var(--text-sub); text-align:center; grid-column:span 2;">日付を先に選択してください</p>
+            </div>
           </div>
           <div class="form-group">
             <label>メモ・連絡事項</label>
