@@ -150,10 +150,14 @@
       document.getElementById('adminPassInput').value = '';
     });
 
-    // 日付プルダウン初期化（今日〜2026年9月30日まで）
-    function initDateDropdown() {
-      const selectEl = document.getElementById('resDateSelect');
-      selectEl.innerHTML = '<option value="">-- 日付を選択してください --</option>';
+    // 日付プルダウン初期化（友人用 ＆ 仁専用 NG設定用）
+    function initDateDropdowns() {
+      const selectGuest = document.getElementById('resDateSelect');
+      const selectNg = document.getElementById('ngDateSelect');
+
+      selectGuest.innerHTML = '<option value="">-- 日付を選択してください --</option>';
+      selectNg.innerHTML = '<option value="">-- 日付を選択してください --</option>';
+
       const days = ['日', '月', '火', '水', '木', '金', '土'];
 
       let current = new Date();
@@ -166,10 +170,15 @@
         const dateVal = `${yyyy}-${mm}-${dd}`;
         const dayStr = days[current.getDay()];
 
-        const opt = document.createElement('option');
-        opt.value = dateVal;
-        opt.innerText = `${yyyy}/${mm}/${dd} (${dayStr})`;
-        selectEl.appendChild(opt);
+        const opt1 = document.createElement('option');
+        opt1.value = dateVal;
+        opt1.innerText = `${yyyy}/${mm}/${dd} (${dayStr})`;
+        selectGuest.appendChild(opt1);
+
+        const opt2 = document.createElement('option');
+        opt2.value = dateVal;
+        opt2.innerText = `${yyyy}/${mm}/${dd} (${dayStr})`;
+        selectNg.appendChild(opt2);
 
         current.setDate(current.getDate() + 1);
       }
@@ -207,6 +216,13 @@
 
       if (!dateVal) {
         gridContainer.innerHTML = '<p style="font-size:0.8rem; color:var(--text-sub); text-align:center; grid-column:span 2;">日付を先に選択してください</p>';
+        return;
+      }
+
+      // 「退院」判定：現在選ばれた日付が、退院日以降かどうかをチェック
+      const dischargeNg = ngData.find(n => n.note === '退院');
+      if (dischargeNg && dateVal >= dischargeNg.date) {
+        gridContainer.innerHTML = `<p style="font-size:0.85rem; color:var(--danger-color); text-align:center; grid-column:span 2; font-weight:bold; padding: 12px; background: rgba(231,76,60,0.1); border-radius:8px;">退院のため、${dischargeNg.date} 以降の面会予約は受け付けておりません。</p>`;
         return;
       }
 
@@ -295,16 +311,30 @@
     // 仁専用：NG時間帯の追加
     document.getElementById('ngForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const date = document.getElementById('ngDate').value;
+      const date = document.getElementById('ngDateSelect').value;
+      if (!date) {
+        alert("日付を選択してください。");
+        return;
+      }
       const startHour = document.getElementById('ngStartHour').value;
       const endHour = document.getElementById('ngEndHour').value;
-      const note = document.getElementById('ngNote').value;
+      const note = document.getElementById('ngNoteSelect').value;
+
+      if (parseInt(startHour) >= parseInt(endHour) && note !== '退院') {
+        alert("終了時間は開始時間より後の時間を選択してください。");
+        return;
+      }
 
       try {
         await addDoc(collection(db, "ng_dates"), {
-          date, startHour, endHour, note, createdAt: new Date()
+          date,
+          startHour: note === '退院' ? '12' : startHour,
+          endHour: note === '退院' ? '20' : endHour,
+          note,
+          createdAt: new Date()
         });
         document.getElementById('ngForm').reset();
+        alert(note === '退院' ? `${date} 以降を退院日として登録しました。` : "NG時間を追加しました。");
       } catch (err) {
         alert("NG設定の追加に失敗しました: " + err.message);
       }
@@ -392,12 +422,12 @@
         const id = docSnap.id;
         ngData.push(data);
 
-        const timeInfo = data.startHour ? `${data.startHour}:00〜${data.endHour}:00` : '終日';
+        const timeInfo = data.note === '退院' ? '終日〜以降不可' : (data.startHour ? `${data.startHour}:00〜${data.endHour}:00` : '終日');
         const aItem = document.createElement('div');
         aItem.className = 'list-item ng-item';
         aItem.innerHTML = `
           <div class="list-item-header">⛔ ${data.date} (${timeInfo})</div>
-          ${data.note ? `<div class="list-item-note">${data.note}</div>` : ''}
+          <div class="list-item-note" style="color: var(--danger-color); font-weight: bold;">【${data.note || '不可'}】</div>
           <button class="btn-delete" onclick="deleteData('ng_dates', '${id}')">削除</button>
         `;
         aList.appendChild(aItem);
@@ -439,7 +469,7 @@
     };
 
     // 初期起動処理
-    initDateDropdown();
+    initDateDropdowns();
     renderVisitorFields();
   </script>
 </head>
@@ -528,11 +558,23 @@
 
         <!-- 面会不可 (NG) 日時設定 -->
         <div class="card">
-          <div class="card-title">⛔ 検査・リハビリ等のNG時間設定</div>
+          <div class="card-title">⛔ 検査・予定等のNG日時設定</div>
           <form id="ngForm">
             <div class="form-group">
               <label>日付</label>
-              <input type="date" id="ngDate" required>
+              <select id="ngDateSelect" required>
+                <option value="">-- 日付を選択してください --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>理由・項目</label>
+              <select id="ngNoteSelect">
+                <option value="検査">検査</option>
+                <option value="食事">食事</option>
+                <option value="入浴">入浴</option>
+                <option value="その他">その他</option>
+                <option value="退院">退院（これ以降の予約をブロック）</option>
+              </select>
             </div>
             <div class="form-group" style="display: flex; gap: 8px;">
               <div style="flex: 1;">
@@ -561,10 +603,6 @@
                   <option value="20">20:00</option>
                 </select>
               </div>
-            </div>
-            <div class="form-group">
-              <label>理由・メモ</label>
-              <input type="text" id="ngNote" placeholder="例: 回診・リハビリなど">
             </div>
             <button type="submit" class="btn btn-primary">NG時間を追加</button>
           </form>
